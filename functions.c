@@ -48,7 +48,11 @@ void quicksleep(int cyc) {
    repeated calls to display_image; display_image overwrites
    about half of the digits shown by display_debug.
 */   
-void display_debug( volatile int * const addr )
+void display_debug( volatile int * const addr ) /*visa adressen och dess innehåll på displayen
+						för debugging. Den tar en pekare till en volatile
+      						int som parameter, som antas vara en minnesadress.
+	    					Funktionen använder andra hjälpfunktioner som display_string, 
+	  					num32asc, och display_update för att skriva texten på displayen.*/
 {
   display_string( 1, "Addr" );
   display_string( 2, "Data" );
@@ -57,14 +61,16 @@ void display_debug( volatile int * const addr )
   display_update();
 }
 
-uint8_t spi_send_recv(uint8_t data) {
+uint8_t spi_send_recv(uint8_t data) { /*Kommunikationsbuss, väntar på att överföring--> slytföras, 
+					innan den retunderar mottagen data*/
+					
 	while(!(SPI2STAT & 0x08));
 	SPI2BUF = data;
 	while(!(SPI2STAT & 1));
 	return SPI2BUF;
 }
 
-void display_init(void) {
+void display_init(void) {		/*Uppdaerar displayen mha spi kommunikationsbussen*/
         DISPLAY_CHANGE_TO_COMMAND_MODE;
 	quicksleep(10);
 	DISPLAY_ACTIVATE_VDD;
@@ -94,14 +100,16 @@ void display_init(void) {
 	spi_send_recv(0xAF);
 }
 
-void display_string(int line, char *s) {
+void display_string(int line, char *s) {		/*skriva en strrräng på display tar ett radnummer
+							och en sträng som parameter och skriver strängen på
+       							den angivna raden på displayen. */
 	int i;
 	if(line < 0 || line >= 4)
 		return;
 	if(!s)
 		return;
 	
-	for(i = 0; i < 16; i++)
+	for(i = 0; i < 16; i++) 			//varje rad på displayen har en bredd på 16 tecken
 		if(*s) {
 			textbuffer[line][i] = *s;
 			s++;
@@ -109,7 +117,11 @@ void display_string(int line, char *s) {
 			textbuffer[line][i] = ' ';
 }
 
-void display_image(int x, const uint8_t *data) {
+void display_image(int x, const uint8_t *data) {		/* visa en bild på displayen.
+								Den tar en x-position och en pekare 
+								till en array av bilddata som parameter 
+								och skickar sedan bilddata till displayen 
+								över SPI-bussen för att visas.*/
 	int i, j;
 	
 	for(i = 0; i < 4; i++) {
@@ -118,12 +130,15 @@ void display_image(int x, const uint8_t *data) {
 		spi_send_recv(0x22);
 		spi_send_recv(i);
 		
-		spi_send_recv(x & 0xF);
-		spi_send_recv(0x10 | ((x >> 4) & 0xF));
+		spi_send_recv(x & 0xF);				//behåller 4 lägst abitarna
+		spi_send_recv(0x10 | ((x >> 4) & 0xF));		/*SKiftar åt höhger, tar bort 4 LSB, AND behåller MSB som LSBa,
+  								Därefter utförs en bitvis "OR"-operation mellan resultatet av "AND"-operationen 
+	  							och 0x10 för att ställa in det femte bitet (från höger till vänster) till 1, 
+	  							vilket indikerar en kommandobyte för x-positionen.*/
 		
 		DISPLAY_CHANGE_TO_DATA_MODE;
 		
-		for(j = 0; j < 128; j++)
+		for(j = 0; j < 128; j++)		//128pixlar
 			spi_send_recv(data[i*128 + j]); // add (~) för att 0:or som på och 1:or som av.
 	}
 }
@@ -131,23 +146,28 @@ void display_image(int x, const uint8_t *data) {
 void display_update(void) {
 	int i, j, k;
 	int c;
-	for(i = 0; i < 4; i++) {
-		DISPLAY_CHANGE_TO_COMMAND_MODE;
+	for(i = 0; i < 4; i++) {			//loopar igenom varje rad pådisplay
+
+							/*skickar kommandot 0x22 för att specificera att nästa 
+  							data ska skickas till raden som motsvarar i. Sedan skickas x-positione 
+	 						till displayen genom att skicka 0x0 och 0x10, vilket ställer in x-positionen t
+							ill början av raden.*/
+		DISPLAY_CHANGE_TO_COMMAND_MODE;		
 		spi_send_recv(0x22);
 		spi_send_recv(i);
 		
 		spi_send_recv(0x0);
 		spi_send_recv(0x10);
 		
-		DISPLAY_CHANGE_TO_DATA_MODE;
+		DISPLAY_CHANGE_TO_DATA_MODE; 		//gör så spi kan läsa av data 
 		
-		for(j = 0; j < 16; j++) {
-			c = textbuffer[i][j];
-			if(c & 0x80)
+		for(j = 0; j < 16; j++) { 		// kör igenom varje teckeposition i en rad
+			c = textbuffer[i][j];		// den aktuella positionen (j) i den aktuella raden (i) av textbuffer.
+			if(c & 0x80)			// om MSB = 1 fortsätt, ty tecken inte giltigh eller användbar
 				continue;
 			
 			for(k = 0; k < 8; k++)
-				spi_send_recv(font[c*8 + k]);
+				spi_send_recv(font[c*8 + k]); //font array, vare tecken = 8 bit, c*8 = rätt position i font-array, lägger till specifik plats i k
 		}
 	}
 }
@@ -353,16 +373,16 @@ void clear_screen(void)
 till arrayen som skärmen använder.*/
 void draw_pixel(int x, int y, uint8_t* map, int value) 
 {
-  int page = y / 8;
-  int pixel = y % 8;
-  int index = page * 128 + x;
-  if(value == 1)
+  int page = y / 8;		//vilken koordinat y tillhör
+  int pixel = y % 8;		//vilken pixel y-koordinaten tillhör
+  int index = page * 128 + x;	//total index på karta = 128 pixlar + x-koordinat
+  if(value == 1)		//om 1, skriv rita pixel
   {
-    map[index] |= 1 << pixel;
+    map[index] |= 1 << pixel; 	//sätter korrekt pixel till 1 mha OR
   }
   else
   {
-    map[index] &= ~(1 << pixel);
+    map[index] &= ~(1 << pixel); //om den inte är ett
   }
 }
 
@@ -402,13 +422,13 @@ void move_bracket(bracket *br, int d, uint8_t* map)
       // Tänd den översta pixeln
       draw_pixel(br->x, br->y - 1, map, 1);
       // Uppdatera y-koordinaten
-      br->y -= 1;
+      br->y -= 1; //flyttar brakceten 1 uppåt
     }
   }
 
   if(d == 2) //Flytta bracketen nedåt(BTN2)
   {
-    if((br->y + br->y_height) < 32)
+    if((br->y + br->y_height) < 32) //32= höden dvs y-kordinaternra
     {
       // Släck den översta pixeln
       draw_pixel(br->x, br->y, map, 0);
@@ -488,7 +508,7 @@ void move_ball(ball *b, uint8_t* map)
       game_over();
     }
 
-    if(b->x == 127)
+    if(b->x == 127)		//varförr 127?
     {
       winner = 1;
       game_over();
